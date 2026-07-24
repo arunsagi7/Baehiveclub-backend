@@ -180,17 +180,21 @@ const verifyPayment = async (req, res) => {
     );
 
     // Generate PDF & Send Email
+    let mailSent = false;
     try {
       const pdf = await createTicket(booking);
-      await sendTicketMail(booking.email, booking.name, pdf);
+      mailSent = await sendTicketMail(booking.email, booking.name, pdf);
     } catch (ticketErr) {
-      console.error("Error creating or sending ticket PDF:", ticketErr);
+      console.error("Error creating or sending ticket PDF:", ticketErr.message || ticketErr);
     }
 
     res.json({
       success: true,
-      message: 'Payment verified and ticket sent successfully!',
+      message: mailSent 
+        ? 'Payment verified and ticket sent to email successfully!' 
+        : 'Payment verified and ticket generated, but email dispatch failed. Please check backend email credentials.',
       ticket: ticketNo,
+      mailSent: mailSent,
       booking: booking
     });
   } catch (err) {
@@ -198,6 +202,7 @@ const verifyPayment = async (req, res) => {
     res.status(500).json({ success: false, message: 'Payment verification error.' });
   }
 };
+
 
 
 // GET /api/payments (Admin panel payment records view)
