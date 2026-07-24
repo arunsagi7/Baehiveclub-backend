@@ -11,10 +11,14 @@ require('dotenv').config();
 const db = require('./database/db');
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.process?.env?.PORT || process.env.PORT || 5000;
+
+// Enable trust proxy for reverse proxy platforms like Railway, Heroku, Vercel
+app.set('trust proxy', 1);
 
 // Security Middlewares
 app.use(helmet({
+
   crossOriginResourcePolicy: false, // Allow frontend to request uploads/ images
 }));
 
