@@ -1,6 +1,8 @@
 const crypto = require('crypto');
 const db = require('../database/db');
 const razorpay = require('../config/razorpay');
+const { createTicket } = require('../lib/ticket');
+const { sendTicketMail } = require('../lib/mail');
 
 // Helper to double check signature validity manually if needed
 const verifyRazorpaySignature = (orderId, paymentId, signature, secret) => {
@@ -114,13 +116,17 @@ const verifyPayment = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Registration record not found.' });
     }
 
-    if (registration.paymentStatus === 'completed') {
-      return res.json({ success: true, message: 'Payment already verified and completed.' });
-    }
-
     const event = await db.getAsync('SELECT * FROM events WHERE id = ?', [registration.eventId]);
     if (!event) {
       return res.status(404).json({ success: false, message: 'Associated event not found.' });
+    }
+
+    if (registration.paymentStatus === 'completed') {
+      return res.json({
+        success: true,
+        message: 'Payment already verified and completed.',
+        ticket: registration.ticket_no,
+      });
     }
 
     // Verify payment authenticity
@@ -147,27 +153,52 @@ const verifyPayment = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Payment verification failed.' });
     }
 
-    // Complete transaction in DB
-    db.serialize(async () => {
-      // Update registration status to completed
-      await db.runAsync(
-        "UPDATE registrations SET paymentStatus = 'completed', paymentId = ?, signature = ? WHERE orderId = ?",
-        [paymentId, signature || null, orderId]
-      );
+    // Generate Ticket Number & Booking Details
+    const ticketNo = "EVT-" + Date.now();
+    const booking = {
+      name: registration.name,
+      email: registration.email,
+      event: event.title,
+      ticket_no: ticketNo
+    };
 
-      // Decrement seats in events
-      await db.runAsync(
-        'UPDATE events SET remainingSeats = remainingSeats - ? WHERE id = ?',
-        [registration.tickets, registration.eventId]
-      );
+    // Insert into bookings table
+    await db.runAsync(
+      `INSERT INTO bookings (name, email, event, ticket_no) VALUES (?, ?, ?, ?)`,
+      [booking.name, booking.email, booking.event, booking.ticket_no]
+    );
+
+    // Complete transaction in DB registrations & update seats
+    await db.runAsync(
+      "UPDATE registrations SET paymentStatus = 'completed', paymentId = ?, signature = ?, ticket_no = ? WHERE orderId = ?",
+      [paymentId, signature || null, ticketNo, orderId]
+    );
+
+    await db.runAsync(
+      'UPDATE events SET remainingSeats = remainingSeats - ? WHERE id = ?',
+      [registration.tickets, registration.eventId]
+    );
+
+    // Generate PDF & Send Email
+    try {
+      const pdf = await createTicket(booking);
+      await sendTicketMail(booking.email, booking.name, pdf);
+    } catch (ticketErr) {
+      console.error("Error creating or sending ticket PDF:", ticketErr);
+    }
+
+    res.json({
+      success: true,
+      message: 'Payment verified and ticket sent successfully!',
+      ticket: ticketNo,
+      booking: booking
     });
-
-    res.json({ success: true, message: 'Payment verified and seats reserved successfully!' });
   } catch (err) {
     console.error('Verify payment error:', err);
     res.status(500).json({ success: false, message: 'Payment verification error.' });
   }
 };
+
 
 // GET /api/payments (Admin panel payment records view)
 const getPayments = async (req, res) => {

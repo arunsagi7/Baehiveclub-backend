@@ -87,6 +87,7 @@ const initSchema = () => {
         paymentId TEXT,
         orderId TEXT,
         signature TEXT,
+        ticket_no TEXT,
         paymentStatus TEXT DEFAULT 'pending',
         createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (eventId) REFERENCES events(id)
@@ -95,6 +96,26 @@ const initSchema = () => {
       if (err) console.error('Error creating registrations table:', err);
       else console.log('✅ registrations table ready');
     });
+
+    // Bookings table
+    db.run(`
+      CREATE TABLE IF NOT EXISTS bookings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT,
+        email TEXT,
+        event TEXT,
+        ticket_no TEXT,
+        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `, (err) => {
+      if (err) console.error('Error creating bookings table:', err);
+      else console.log('✅ bookings table ready');
+    });
+
+    // Ensure ticket_no column exists in existing sqlite database
+    db.run(`ALTER TABLE registrations ADD COLUMN ticket_no TEXT`, () => {});
+
+
   });
 };
 
