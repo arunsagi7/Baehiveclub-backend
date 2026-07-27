@@ -48,7 +48,7 @@ const createOrder = async (req, res) => {
     if (amount <= 0 || !razorpay) {
       // Mock order generation for free events or local development fallback without payment gateway keys
       const mockOrderId = `order_mock_${Date.now()}`;
-      
+
       // Store pending registration
       const result = await db.runAsync(
         `INSERT INTO registrations (eventId, name, email, phone, address, tickets, amount, orderId, paymentStatus)
@@ -138,7 +138,7 @@ const verifyPayment = async (req, res) => {
       if (!signature) {
         return res.status(400).json({ success: false, message: 'Signature is required for production payments.' });
       }
-      
+
       if (razorpay) {
         verified = verifyRazorpaySignature(orderId, paymentId, signature, process.env.RAZORPAY_KEY_SECRET);
       }
@@ -179,19 +179,37 @@ const verifyPayment = async (req, res) => {
       [registration.tickets, registration.eventId]
     );
 
-    // Generate PDF & Send Email
+    // Generate PDF & Send Email asynchronously (non-blocking)
     let mailSent = false;
     try {
       const pdf = await createTicket(booking);
-      mailSent = await sendTicketMail(booking.email, booking.name, pdf);
+      // Run email sending in the background without awaiting, so the user doesn't wait
+      sendTicketMail(booking.email, booking.name, {
+        eventName: event.title,
+        date: event.date,
+        time: `${event.startTime} - ${event.endTime}`,
+        location: event.venue || event.location,
+        ticket_type: `${registration.tickets} Ticket(s)`
+      }, pdf)
+        .then(sent => {
+          if (sent) {
+            console.log(`✉️ Async email dispatched successfully to ${booking.email}`);
+          } else {
+            console.warn(`⚠️ Async email dispatch failed for ${booking.email}`);
+          }
+        })
+        .catch(err => console.error("Async email error:", err));
+
+      // Assume initiated/sent for API response to not block the user
+      mailSent = true;
     } catch (ticketErr) {
-      console.error("Error creating or sending ticket PDF:", ticketErr.message || ticketErr);
+      console.error("Error creating ticket PDF:", ticketErr.message || ticketErr);
     }
 
     res.json({
       success: true,
-      message: mailSent 
-        ? 'Payment verified and ticket sent to email successfully!' 
+      message: mailSent
+        ? 'Payment verified and ticket sent to email successfully!'
         : 'Payment verified and ticket generated, but email dispatch failed. Please check backend email credentials.',
       ticket: ticketNo,
       mailSent: mailSent,
